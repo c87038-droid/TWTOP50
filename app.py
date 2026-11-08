@@ -18,7 +18,7 @@ st.set_page_config(
 )
 
 # 雙檔版本驗證：即使 GitHub 只更新 app.py，仍能顯示可理解的錯誤，而非 ImportError。
-WEB_BUILD = "20261108-R9-LARGE"
+WEB_BUILD = "20261108-R11-AUTOFIT"
 REQUIRED = (
     "TOP", "CANDIDATES", "HistoryStore", "MisClient", "apply_mis", "csv_bytes",
     "dec_str", "enrich", "fetch_official", "fetch_pe_snapshot", "attach_pe",
@@ -175,6 +175,136 @@ h1,h2,h3 {font-family:system-ui,'Microsoft JhengHei',sans-serif}
   .stock-row .info {font-size:13px}
   .board-note {font-size:14px}
 }
+
+/* R10 稍加大字體：約 8–12%；不修改前 50 名、行情、本益比、均線或下載邏輯。 */
+.board-title {font-size:clamp(32px,3.6vw,46px)}
+.board-subtitle {font-size:17px}
+.index-title {font-size:20px}
+.index-level {font-size:clamp(41px,6.6vw,62px)}
+.index-move {font-size:clamp(23px,3.9vw,32px)}
+.index-note {font-size:15px}
+.summarybox .metric-label {font-size:16px}
+.summarybox .metric-value {font-size:26px}
+.board-note {font-size:16px}
+.stock-row {font-size:17px;padding:15px 12px;line-height:1.56}
+.stock-head {font-size:15px}
+.stock-row .rank {font-size:24px}
+.stock-row .stock-code {font-size:20px}
+.stock-row .stock-name {font-size:22px}
+.stock-row .stock-market {font-size:15px}
+.stock-row .price-value {font-size:27px}
+.stock-row .change {font-size:16px}
+.stock-row .pe-inline {font-size:16px}
+.stock-row .pe-inline strong {font-size:20px}
+.stock-row .cap {font-size:18px}
+.stock-row .cap-label {font-size:15px}
+.stock-row .ma {font-size:17px}
+.stock-row .ma strong {font-size:17px}
+.stock-row .flag, .stock-row .warn {font-size:17px}
+.stock-row .info {font-size:14px}
+div[data-testid="stButton"] button, div[data-testid="stDownloadButton"] button {font-size:17px}
+@media (max-width:1040px){
+ .stock-row .pe-inline {font-size:16px}
+ .stock-row .pe-inline strong {font-size:19px}
+}
+@media (max-width:560px){
+ .board-title {font-size:31px}
+ .board-subtitle {font-size:16px}
+ .index-level {font-size:39px}
+ .index-move {font-size:23px}
+ .index-note {font-size:14px}
+ .summarybox .metric-label {font-size:15px}
+ .summarybox .metric-value {font-size:21px}
+ .stock-row {padding:14px 10px;gap:8px 6px}
+ .stock-row .rank {font-size:21px}
+ .stock-row .stock-name {font-size:21px}
+ .stock-row .stock-code {font-size:18px}
+ .stock-row .price-value {font-size:25px}
+ .stock-row .change {font-size:15px}
+ .stock-row .pe-inline {font-size:15px}
+ .stock-row .pe-inline strong {font-size:18px}
+ .stock-row .cap {font-size:16px}
+ .stock-row .cap-label {font-size:13px}
+ .stock-row .ma, .stock-row .ma strong {font-size:16px}
+ .stock-row .flag, .stock-row .warn {font-size:16px}
+ .stock-row .info {font-size:14px}
+ .board-note {font-size:15px}
+}
+
+
+/* R11 排版優化：只有寬度／高度／間距；沿用 R10 所有字體大小與字型。 */
+*, *::before, *::after {box-sizing:border-box}
+.stock-list {width:100%;max-width:100%;gap:8px}
+.stock-row {width:100%;max-width:100%;height:auto;min-height:0;box-sizing:border-box;overflow:visible;align-items:center}
+.stock-row > div {min-width:0}
+.stock-row .identity-line {max-width:100%}
+.stock-row .stock-name {overflow-wrap:anywhere}
+.stock-row .price, .stock-row .cap {min-width:0}
+.stock-row .price-value {font-variant-numeric:tabular-nums}
+.stock-row .ma span {white-space:nowrap;max-width:100%}
+.summarybar {width:100%;max-width:100%}
+.summarybox {min-width:0;height:auto}
+.index-card {width:100%;max-width:100%;height:auto}
+.index-main {min-width:0}
+@media (min-width:1041px) {
+  .stock-row:not(.stock-head) {grid-template-columns:35px minmax(135px,1.25fr) minmax(135px,1fr) minmax(110px,.75fr) minmax(135px,1fr) minmax(245px,1.6fr) minmax(160px,1.15fr);gap:9px;padding:12px 10px}
+  .stock-head {grid-template-columns:35px minmax(135px,1.25fr) minmax(135px,1fr) minmax(110px,.75fr) minmax(135px,1fr) minmax(245px,1.6fr) minmax(160px,1.15fr);gap:9px;padding:10px}
+}
+@media (min-width:561px) and (max-width:1040px) {
+  .stock-row {grid-template-columns:36px minmax(0,1.25fr) minmax(115px,.85fr) minmax(112px,.8fr);column-gap:10px;row-gap:6px;padding:11px 12px}
+  .stock-row .ma {margin-top:3px;padding-top:4px;row-gap:3px}
+  .stock-row .flags {gap:6px 12px}
+}
+@media (max-width:560px) {
+  .block-container {width:100%;max-width:100%;padding-left:8px;padding-right:8px}
+  .stock-list {gap:7px}
+  .stock-row {
+    grid-template-columns:29px minmax(0,1fr) minmax(104px,max-content);
+    grid-template-areas:
+      "rank identity price"
+      "rank identity cap"
+      "flags flags flags"
+      "ma ma ma"
+      "quote quote quote";
+    column-gap:7px;row-gap:5px;
+    padding:10px 9px;
+    border-radius:11px;
+    align-items:start;
+  }
+  .stock-row .rank {align-self:start}
+  .stock-row .identity-line {gap:4px 6px;align-content:start}
+  .stock-row .stock-market {margin-top:2px}
+  .stock-row .price,.stock-row .cap {justify-self:end;text-align:right;max-width:100%}
+  .stock-row .change,.stock-row .pe-inline,.stock-row .cap-label {margin-top:2px}
+  .stock-row .cap-label {margin-left:4px}
+  .stock-row .flags {display:flex;gap:2px 12px;align-items:center;flex-wrap:wrap}
+  .stock-row .ma {display:flex;gap:3px 14px;justify-content:flex-start;align-items:center;flex-wrap:wrap;padding-top:5px;margin-top:1px;border-top:1px solid #e1e8f0}
+  .stock-row .info {margin-top:1px;overflow-wrap:anywhere}
+  .summarybar {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:9px 0}
+  .summarybox {width:100%;min-width:0;padding:9px 10px}
+  .index-card {padding:12px 13px;margin:10px 0}
+  .index-main {gap:4px 10px}
+  .board-note {margin:6px 0 9px}
+}
+@media (max-width:345px) {
+  .block-container {padding-left:6px;padding-right:6px}
+  .stock-row {
+    grid-template-columns:27px minmax(0,1fr) minmax(0,1fr);
+    grid-template-areas:
+      "rank identity identity"
+      "price price cap"
+      "flags flags flags"
+      "ma ma ma"
+      "quote quote quote";
+    padding:9px 8px;
+    column-gap:6px;row-gap:5px;
+  }
+  .stock-row .price {justify-self:start;text-align:left}
+  .stock-row .cap {justify-self:end;text-align:right}
+  .stock-row .cap-label {display:block;margin-left:0}
+  .stock-row .ma {column-gap:12px}
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -339,7 +469,7 @@ def stock_html(row):
 </div>'''
 
 
-st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 三條均線 · 大盤漲跌 · R9 大字體版</div>', unsafe_allow_html=True)
+st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 三條均線 · 大盤漲跌 · R11 手機最適欄寬／列高版</div>', unsafe_allow_html=True)
 
 
 @st.fragment(run_every="15s")
