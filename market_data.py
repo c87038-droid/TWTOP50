@@ -36,6 +36,7 @@ OFFICIAL_HOSTS = frozenset({"openapi.twse.com.tw", "www.tpex.org.tw", "mis.twse.
 BILLION = Decimal("100000000")
 MA_WINDOWS = (60, 120, 240)
 TOP = 50
+DATA_BUILD = "20261108-R7-PE-FIX"
 CANDIDATES = 200
 
 

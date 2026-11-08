@@ -8,10 +8,7 @@ import time
 
 import streamlit as st
 
-from market_data import (
-    TOP, CANDIDATES, HistoryStore, MisClient, apply_mis, csv_bytes,
-    dec_str, enrich, fetch_official, fetch_pe_snapshot, attach_pe, is_after_close, is_session, now_tw,
-)
+import market_data as md
 
 st.set_page_config(
     page_title="台股市值前50大｜手機排行榜",
@@ -19,6 +16,24 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# 雙檔版本驗證：即使 GitHub 只更新 app.py，仍能顯示可理解的錯誤，而非 ImportError。
+WEB_BUILD = "20261108-R7-PE-FIX"
+REQUIRED = (
+    "TOP", "CANDIDATES", "HistoryStore", "MisClient", "apply_mis", "csv_bytes",
+    "dec_str", "enrich", "fetch_official", "fetch_pe_snapshot", "attach_pe",
+    "is_after_close", "is_session", "now_tw",
+)
+missing = [name for name in REQUIRED if not hasattr(md, name)]
+if missing:
+    st.error("GitHub 上的 app.py 與 market_data.py 不是同一個版本，網站暫時無法啟動。")
+    st.markdown("**修復方法：**請把修正版的 `app.py` 和 `market_data.py` 兩個檔案一起覆蓋到 GitHub 資料庫的最外層，再按 `Commit changes`。")
+    st.code("market_data.py 缺少：" + ", ".join(missing), language="text")
+    st.stop()
+
+(TOP, CANDIDATES, HistoryStore, MisClient, apply_mis, csv_bytes,
+ dec_str, enrich, fetch_official, fetch_pe_snapshot, attach_pe,
+ is_after_close, is_session, now_tw) = tuple(getattr(md, name) for name in REQUIRED)
 
 st.markdown("""
 <style>
@@ -203,7 +218,7 @@ def stock_html(row):
 </div>'''
 
 
-st.markdown('<div class="board-title">📈 台股市值 TOP 50｜股票代碼＋本益比版</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 三條均線</div>', unsafe_allow_html=True)
+st.markdown('<div class="board-title">📈 台股市值 TOP 50｜股票代碼＋本益比版</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 三條均線 · R7 修正版</div>', unsafe_allow_html=True)
 
 
 @st.fragment(run_every="15s")
