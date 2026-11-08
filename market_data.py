@@ -26,6 +26,8 @@ TW = timezone(timedelta(hours=8))
 LISTED_QUOTE_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
 LISTED_SHARES_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
 OTC_QUOTE_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
+LISTED_PE_URL = "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL"
+OTC_PE_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis"
 OTC_SHARES_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
 OTC_SHARES_FALLBACK = "https://mopsfin.twse.com.tw/opendata/t187ap03_O.csv"
 MIS_ROOT = "https://mis.twse.com.tw/stock/index.jsp"
@@ -205,6 +207,50 @@ def fetch_official():
     oq = get_list(OTC_QUOTE_URL, agent=agent)
     oi = get_otc_shares(agent)
     return build_universe(lq, li, oq, oi)
+
+
+def parse_pe_rows(rows, market):
+    """官方收盤本益比：空白、零或負值代表未公布有效本益比。"""
+    code_key = "Code" if market == "上市" else "SecuritiesCompanyCode"
+    pe_key = "PEratio" if market == "上市" else "PriceEarningRatio"
+    output = {}
+    for r in rows:
+        code = str(r.get(code_key, "")).strip()
+        if not stock_code(code):
+            continue
+        pe = numeric(r.get(pe_key))
+        if pe is not None and pe <= 0:
+            pe = None
+        try:
+            day = parse_date(r.get("Date"))
+        except (ValueError, TypeError):
+            day = None
+        output[(market, code)] = (pe, day)
+    if len(output) < 200:
+        raise ValueError(f"{market}估值資料不完整（{len(output)} 檔）")
+    return output
+
+
+def fetch_pe_snapshot():
+    """分市場獨立下載，讀不到本益比也不影響市值前 50 排名。"""
+    agent = opener()
+    output, warnings = {}, []
+    for market, url in (("上市", LISTED_PE_URL), ("上櫃", OTC_PE_URL)):
+        try:
+            output.update(parse_pe_rows(get_list(url, agent=agent), market))
+        except Exception as exc:
+            warnings.append(f"{market}本益比更新失敗：{str(exc)[:110]}")
+    return output, warnings
+
+
+def attach_pe(rows, pe_map):
+    """複製前 50 名而不修改官方排行榜的共用快取。"""
+    output = []
+    for src in rows:
+        r = dict(src)
+        r["pe"], r["pe_day"] = pe_map.get((r["market"], r["code"]), (None, None))
+        output.append(r)
+    return output
 
 
 def limit_tick(price):
@@ -444,12 +490,14 @@ def csv_bytes(rows, asof):
     f = io.StringIO()
     writer = csv.writer(f)
     writer.writerow(["報表產生時間(台灣)", "排名", "股票代號", "公司名稱", "市場", "資料交易日", "報價時間", "股價", "漲跌元", "漲跌幅%",
-                     "市值億元", "漲跌停", "漲停價", "跌停價", "季線60日", "半年線120日", "年線240日", "均線警示", "股價≤半年線", "股價≤年線", "均線來源狀態", "價格來源"])
+                     "市值億元", "本益比(倍)", "本益比資料日", "漲跌停", "漲停價", "跌停價", "季線60日", "半年線120日", "年線240日", "均線警示", "股價≤半年線", "股價≤年線", "均線來源狀態", "價格來源"])
     def yn(x): return "是" if x is True else "否" if x is False else "無資料"
     for r in rows:
         writer.writerow([asof.strftime("%Y-%m-%d %H:%M:%S"), r["rank"], r["code"], r["name"], r["market"],
                          str(r["quote_day"]), r["quote_time"], r["price"], r["delta"] if r["delta"] is not None else "",
-                         dec_str(r["pct"]) if r["pct"] is not None else "", dec_str(r["cap"]), r["limit"],
+                         dec_str(r["pct"]) if r["pct"] is not None else "", dec_str(r["cap"]),
+                         dec_str(r.get("pe")) if r.get("pe") is not None else "",
+                         r["pe_day"].isoformat() if r.get("pe_day") else "", r["limit"],
                          r["up_price"] or "", r["down_price"] or "", r["ma60"] or "", r["ma120"] or "", r["ma240"] or "",
                          r["ma_alert"], yn(r["half_alert"]), yn(r["year_alert"]), r["ma_state"], r["source"]])
     return ("\ufeff"+f.getvalue()).encode("utf-8")
