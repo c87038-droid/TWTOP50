@@ -30,13 +30,15 @@ LISTED_PE_URL = "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL"
 OTC_PE_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis"
 OTC_SHARES_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
 OTC_SHARES_FALLBACK = "https://mopsfin.twse.com.tw/opendata/t187ap03_O.csv"
+INDEX_CLOSE_URL = "https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX"
+INDEX_INTRADAY_URL = "https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_INDEX?response=json"
 MIS_ROOT = "https://mis.twse.com.tw/stock/index.jsp"
 MIS_QUOTES = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
-OFFICIAL_HOSTS = frozenset({"openapi.twse.com.tw", "www.tpex.org.tw", "mis.twse.com.tw", "mopsfin.twse.com.tw"})
+OFFICIAL_HOSTS = frozenset({"openapi.twse.com.tw", "www.tpex.org.tw", "mis.twse.com.tw", "mopsfin.twse.com.tw", "www.twse.com.tw"})
 BILLION = Decimal("100000000")
 MA_WINDOWS = (60, 120, 240)
 TOP = 50
-DATA_BUILD = "20261108-R7-PE-FIX"
+DATA_BUILD = "20261108-R8-INDEX"
 CANDIDATES = 200
 
 
@@ -208,6 +210,107 @@ def fetch_official():
     oq = get_list(OTC_QUOTE_URL, agent=agent)
     oi = get_otc_shares(agent)
     return build_universe(lq, li, oq, oi)
+
+
+def parse_index_close(rows):
+    """讀取證交所 MI_INDEX 官方收盤：漲跌點數通常是正數，須依漲跌符號還原。"""
+    for r in rows:
+        if str(r.get("指數", "")).strip() != "發行量加權股價指數":
+            continue
+        day = parse_date(r.get("日期"))
+        value = numeric(r.get("收盤指數"))
+        points = numeric(r.get("漲跌點數"))
+        signed_pct = numeric(r.get("漲跌百分比", r.get("漲跌百分比(%)")))
+        if value is None or value <= 0 or points is None:
+            raise ValueError("加權指數缺少收盤或漲跌資料")
+        mark = str(r.get("漲跌", "")).strip()
+        if mark in ("-", "－", "▼", "−"):
+            points = -abs(points)
+        elif mark in ("+", "＋", "▲"):
+            points = abs(points)
+        elif signed_pct is not None:
+            points = abs(points) if signed_pct > 0 else -abs(points) if signed_pct < 0 else Decimal(0)
+        else:
+            raise ValueError("加權指數缺少有效漲跌符號")
+        prev = value - points
+        if signed_pct is None:
+            signed_pct = (points / prev * 100) if prev > 0 else None
+        return {"value": value, "delta": points, "pct": signed_pct, "day": day,
+                "time": "收盤", "source": "證交所正式收盤", "state": "正式收盤"}
+    raise ValueError("官方回傳資料沒有發行量加權股價指數")
+
+
+def fetch_official_index():
+    return parse_index_close(get_list(INDEX_CLOSE_URL))
+
+
+def parse_intraday_index(payload):
+    """MI_5MINS_INDEX：只接受帶有可驗證交易日的資料，避免誤用前日快照。"""
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list) or not payload["data"]:
+        raise ValueError("盤中指數回傳格式不符合預期")
+    if str(payload.get("stat", "OK")) != "OK":
+        raise ValueError("盤中指數來源未回傳 OK")
+    day = parse_date(payload.get("date"))
+    last = payload["data"][-1]
+    if not isinstance(last, list) or len(last) < 2:
+        raise ValueError("盤中指數缺少時間或指數數值")
+    value = numeric(last[1])
+    if value is None or value <= 0:
+        raise ValueError("盤中指數數值無效")
+    return {"value": value, "day": day, "time": str(last[0]), "source": "證交所盤中指數", "prev": None}
+
+
+def parse_mis_index(payload):
+    """MIS 為第二個嘗試的來源；若不是 t00 加權指數，絕不當成大盤。"""
+    if not isinstance(payload, dict):
+        raise ValueError("MIS 指數資料非物件")
+    candidates = payload.get("msgArray", [])
+    for r in candidates if isinstance(candidates, list) else []:
+        if str(r.get("c", "")).lower() != "t00" or str(r.get("ex", "")).lower() != "tse":
+            continue
+        day = parse_date(r.get("d"))
+        value = numeric(r.get("z")) or numeric(r.get("pz"))
+        if value is None or value <= 0:
+            raise ValueError("MIS 大盤指數數值無效")
+        return {"value": value, "day": day, "time": str(r.get("t") or ""),
+                "source": "證交所 MIS 盤中指數", "prev": numeric(r.get("y"))}
+    raise ValueError("MIS 未提供有效加權指數代號 t00")
+
+
+def fetch_live_index():
+    errors = []
+    try:
+        return parse_intraday_index(get_json(INDEX_INTRADAY_URL, timeout=9))
+    except Exception as exc:
+        errors.append(str(exc)[:90])
+    try:
+        agent = opener(cookie=True)
+        query = urlencode({"ex_ch": "tse_t00.tw", "json": 1, "delay": 0, "_": int(time.time()*1000)})
+        return parse_mis_index(get_json(MIS_QUOTES + "?" + query, agent=agent, timeout=9))
+    except Exception as exc:
+        errors.append(str(exc)[:90])
+    raise RuntimeError("大盤盤中行情暫無法讀取：" + "；".join(errors))
+
+
+def resolve_index(close, live, at):
+    """正式收盤優先；盤中只用當日快照並以正確的前日收盤計算漲跌。"""
+    if close and close["day"] == at.date() and not is_session(at):
+        return close.copy()
+    if live and live["day"] == at.date() and (is_session(at) or is_after_close(at)):
+        prev = live.get("prev")
+        if prev is None or prev <= 0:
+            prev = close["value"] if close and close["day"] < at.date() else None
+        val = live["value"]
+        delta = val - prev if prev else None
+        pct = delta / prev * 100 if prev and delta is not None else None
+        state = "盤中更新" if is_session(at) else "盤後參考（待官方確認）"
+        return {"value": val, "delta": delta, "pct": pct, "day": live["day"],
+                "time": live["time"], "source": live["source"], "state": state}
+    if close:
+        latest = close.copy()
+        latest["state"] = "最近交易日正式收盤" if close["day"] < at.date() else "正式收盤"
+        return latest
+    return None
 
 
 def parse_pe_rows(rows, market):

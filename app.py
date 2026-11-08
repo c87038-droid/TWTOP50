@@ -18,11 +18,12 @@ st.set_page_config(
 )
 
 # 雙檔版本驗證：即使 GitHub 只更新 app.py，仍能顯示可理解的錯誤，而非 ImportError。
-WEB_BUILD = "20261108-R7-PE-FIX"
+WEB_BUILD = "20261108-R8-INDEX"
 REQUIRED = (
     "TOP", "CANDIDATES", "HistoryStore", "MisClient", "apply_mis", "csv_bytes",
     "dec_str", "enrich", "fetch_official", "fetch_pe_snapshot", "attach_pe",
     "is_after_close", "is_session", "now_tw",
+    "fetch_official_index", "fetch_live_index", "resolve_index",
 )
 missing = [name for name in REQUIRED if not hasattr(md, name)]
 if missing:
@@ -33,7 +34,8 @@ if missing:
 
 (TOP, CANDIDATES, HistoryStore, MisClient, apply_mis, csv_bytes,
  dec_str, enrich, fetch_official, fetch_pe_snapshot, attach_pe,
- is_after_close, is_session, now_tw) = tuple(getattr(md, name) for name in REQUIRED)
+ is_after_close, is_session, now_tw,
+ fetch_official_index, fetch_live_index, resolve_index) = tuple(getattr(md, name) for name in REQUIRED)
 
 st.markdown("""
 <style>
@@ -46,6 +48,15 @@ h1,h2,h3 {font-family:system-ui,'Microsoft JhengHei',sans-serif}
 .summarybox {flex:1;min-width:135px;border:1px solid #dbe5ef;background:#f5f8fc;border-radius:13px;padding:12px}
 .summarybox .metric-label {display:block;color:#52647c;font-size:13px;margin-bottom:5px}
 .summarybox .metric-value {font-weight:800;font-size:21px;color:#173250}
+.index-card {padding:16px 20px;margin:14px 0 12px;border-radius:16px;background:linear-gradient(115deg,#142f53,#204c7a);color:#fff;box-shadow:0 3px 12px #142b4525}
+.index-title {font-size:15px;font-weight:700;letter-spacing:.4px;color:#e1ebf8}
+.index-main {display:flex;flex-wrap:wrap;align-items:baseline;gap:12px;margin-top:4px}
+.index-level {font-size:clamp(32px,6.3vw,48px);line-height:1.25;font-weight:850;white-space:nowrap;letter-spacing:-.8px;font-variant-numeric:tabular-nums}
+.index-move {font-size:clamp(18px,3.6vw,24px);line-height:1.4;font-weight:800;white-space:nowrap;font-variant-numeric:tabular-nums}
+.index-up {color:#ff9d9d}.index-down {color:#90f0b9}.index-flat {color:#e8eef6}
+.index-note {font-size:12px;color:#cfdfef;margin-top:8px;line-height:1.6}
+@media(max-width:560px){.index-card{padding:14px 12px}.index-main{gap:6px 13px}.index-level{font-size:34px}.index-move{font-size:20px}}
+
 .board-note {color:#53677c;font-size:13px;margin:8px 0 13px;line-height:1.65}
 .stock-list {display:flex;flex-direction:column;gap:7px}
 .stock-row {display:grid;grid-template-columns:42px minmax(125px,1.1fr) minmax(115px,.82fr) minmax(105px,.80fr) minmax(153px,1fr) minmax(250px,1.9fr) minmax(165px,1.25fr);gap:10px;align-items:center;background:#fff;border:1px solid #e1e8f0;border-left:5px solid #c7d7e6;border-radius:12px;padding:11px 9px;box-shadow:0 1px 3px #142b4510;font-size:14px;color:#24374c}
@@ -116,6 +127,50 @@ def mis_snapshot(key: str, _candidates):
 @st.cache_data(ttl=600, show_spinner=False)
 def pe_snapshot():
     return fetch_pe_snapshot()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def official_index_snapshot():
+    return fetch_official_index()
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def intraday_index_snapshot():
+    return fetch_live_index()
+
+
+def index_card(at):
+    """獨立顯示大盤：排行／本益比即使出錯也不影響大盤資訊。"""
+    close = live = None
+    issues = []
+    try:
+        close = official_index_snapshot()
+    except Exception as exc:
+        issues.append("官方收盤來源：" + str(exc)[:90])
+    if is_session(at) or (is_after_close(at) and (not close or close["day"] < at.date())):
+        try:
+            live = intraday_index_snapshot()
+        except Exception as exc:
+            issues.append("盤中來源：" + str(exc)[:90])
+    status = resolve_index(close, live, at)
+    if not status:
+        st.warning("加權指數目前無法取得，排行榜仍可獨立使用。" + ("；".join(issues)[:160] if issues else ""))
+        return
+    delta = status["delta"]
+    pct = status["pct"]
+    colour = "index-up" if delta is not None and delta > 0 else "index-down" if delta is not None and delta < 0 else "index-flat"
+    mark = "▲" if delta is not None and delta > 0 else "▼" if delta is not None and delta < 0 else "—"
+    movement = f"{mark} {abs(delta):,.2f} 點" if delta is not None else "漲跌待確認"
+    percent = f"{pct:+.2f}%" if pct is not None else "—"
+    stamp = f"{status['day']:%Y-%m-%d} {status['time']}"
+    st.markdown(f"""<section class="index-card" aria-label="台股加權股價指數">
+    <div class="index-title">🇹🇼 台股加權指數（TAIEX）</div>
+    <div class="index-main"><span class="index-level">{status['value']:,.2f}</span>
+    <span class="index-move {colour}">{movement}　{percent}</span></div>
+    <div class="index-note">{escape(status['state'])} · {escape(stamp)} · {escape(status['source'])} · 台灣時間</div>
+    </section>""", unsafe_allow_html=True)
+    if issues and close and (not live or close["day"] < at.date()) and is_session(at):
+        st.caption("⚠️ 盤中大盤資料暫無法更新，顯示最近交易日正式收盤值（不是現在的盤中指數）。")
 
 
 @st.cache_resource(show_spinner=False)
@@ -218,13 +273,14 @@ def stock_html(row):
 </div>'''
 
 
-st.markdown('<div class="board-title">📈 台股市值 TOP 50｜股票代碼＋本益比版</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 三條均線 · R7 修正版</div>', unsafe_allow_html=True)
+st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 三條均線 · 大盤漲跌 · R8 修正版</div>', unsafe_allow_html=True)
 
 
 @st.fragment(run_every="15s")
 def live_board():
     state = resources()
     at = now_tw()
+    index_card(at)
     try:
         records, official, mode, fresh, warnings, grabbed_at = build_board(state, at)
         used_old = False
@@ -287,6 +343,8 @@ def live_board():
             mis_snapshot.clear()
             official_snapshot.clear()
             pe_snapshot.clear()
+            official_index_snapshot.clear()
+            intraday_index_snapshot.clear()
             st.rerun(scope="fragment")
     st.markdown(f'<div class="board-note">顯示 <strong>{len(visible)}</strong> 檔（完整排名固定 1～50；篩選不會重新編號）。紅色＝漲停、綠色＝跌停、黃色＝≤半年線、紫色＝≤年線、橘色＝同時≤兩線。<br>本益比取 TWSE／TPEx 官方最近收盤估值（非盤中即時，日期以各檔顯示為準）。均線使用 60／120／240 個交易日的未還原收盤價。資料不足時顯示「—」，不會以 0 代替。</div>', unsafe_allow_html=True)
 
