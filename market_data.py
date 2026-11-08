@@ -36,9 +36,9 @@ MIS_ROOT = "https://mis.twse.com.tw/stock/index.jsp"
 MIS_QUOTES = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
 OFFICIAL_HOSTS = frozenset({"openapi.twse.com.tw", "www.tpex.org.tw", "mis.twse.com.tw", "mopsfin.twse.com.tw", "www.twse.com.tw"})
 BILLION = Decimal("100000000")
-MA_WINDOWS = (60, 120, 240)
+MA_WINDOWS = (5, 20, 60, 120, 240)
 TOP = 50
-DATA_BUILD = "20261108-R8-INDEX"
+DATA_BUILD = "20261108-R13-MA-ALERT"
 CANDIDATES = 200
 
 
@@ -482,7 +482,7 @@ def parse_history(payload):
         except (TypeError, ValueError, OSError, OverflowError):
             continue
         history[dt] = n
-    if len(history) < 60:
+    if len(history) < 5:
         raise ValueError(f"歷史股價不足：{len(history)} 個交易日")
     return history
 
@@ -550,20 +550,36 @@ def moving_averages(row, history):
     prior = sorted((d for d in history if d < day), reverse=True)
     if not prior or (day - prior[0]).days > 21:
         return {n: None for n in MA_WINDOWS}
-    prices = [row["price"]] + [history[d] for d in prior[:239]]
+    prices = [row["price"]] + [history[d] for d in prior[:max(MA_WINDOWS) - 1]]
     return {n: (sum(prices[:n], Decimal(0)) / n if len(prices) >= n else None)
             for n in MA_WINDOWS}
 
 
 def ma_alert(row, ma):
+    """返回警示文字及四個觸線布林值（None=歷史價不足）。"""
     price = row["price"]
-    half = price <= ma[120] if ma.get(120) is not None else None
-    year = price <= ma[240] if ma.get(240) is not None else None
-    if half and year: return "‼ ≤半年＋年線", half, year
-    if year: return "⚠ ≤年線", half, year
-    if half: return "⚠ ≤半年線", half, year
-    if half is None or year is None: return "均線未齊", half, year
-    return "", half, year
+    def hit(n):
+        avg = ma.get(n)
+        return price <= avg if avg is not None and avg > 0 else None
+    five, twenty, half, year = (hit(n) for n in (5, 20, 120, 240))
+    alerts = []
+    if five:
+        alerts.append("≤5日線")
+    if twenty:
+        alerts.append("≤20日線")
+    short = "⚠ " + "＋".join(alerts) if alerts else ""
+    if half and year:
+        long = "‼ ≤半年＋年線"
+    elif year:
+        long = "⚠ ≤年線"
+    elif half:
+        long = "⚠ ≤半年線"
+    else:
+        long = ""
+    text = "｜".join(x for x in (short, long) if x)
+    if not text and (half is None or year is None):
+        text = "均線未齊"
+    return text, five, twenty, half, year
 
 
 def enrich(rows, store):
@@ -573,13 +589,13 @@ def enrich(rows, store):
         row = dict(src)
         hist, hist_status = store.get(symbol_for(row))
         ma = moving_averages(row, hist)
-        alert, half, year = ma_alert(row, ma)
+        alert, five, twenty, half, year = ma_alert(row, ma)
         limit, up, down = market_limits(row)
         prev = row.get("prev_close")
         delta = row["price"] - prev if prev else None
         pct = (delta / prev * 100) if prev else None
-        row.update(rank=rank, ma60=ma[60], ma120=ma[120], ma240=ma[240],
-                   half_alert=half, year_alert=year, ma_alert=alert, ma_state=hist_status,
+        row.update(rank=rank, ma5=ma[5], ma20=ma[20], ma60=ma[60], ma120=ma[120], ma240=ma[240],
+                   ma5_alert=five, ma20_alert=twenty, half_alert=half, year_alert=year, ma_alert=alert, ma_state=hist_status,
                    limit=limit, up_price=up, down_price=down,
                    delta=delta, pct=pct, cap=row["shares"]*row["price"]/BILLION)
         output.append(row)
@@ -594,7 +610,7 @@ def csv_bytes(rows, asof):
     f = io.StringIO()
     writer = csv.writer(f)
     writer.writerow(["報表產生時間(台灣)", "排名", "股票代號", "公司名稱", "市場", "資料交易日", "報價時間", "股價", "漲跌元", "漲跌幅%",
-                     "市值億元", "本益比(倍)", "本益比資料日", "漲跌停", "漲停價", "跌停價", "季線60日", "半年線120日", "年線240日", "均線警示", "股價≤半年線", "股價≤年線", "均線來源狀態", "價格來源"])
+                     "市值億元", "本益比(倍)", "本益比資料日", "漲跌停", "漲停價", "跌停價", "5日線", "20日線", "季線60日", "半年線120日", "年線240日", "均線警示", "股價≤5日線", "股價≤20日線", "股價≤半年線", "股價≤年線", "均線來源狀態", "價格來源"])
     def yn(x): return "是" if x is True else "否" if x is False else "無資料"
     for r in rows:
         writer.writerow([asof.strftime("%Y-%m-%d %H:%M:%S"), r["rank"], r["code"], r["name"], r["market"],
@@ -602,6 +618,6 @@ def csv_bytes(rows, asof):
                          dec_str(r["pct"]) if r["pct"] is not None else "", dec_str(r["cap"]),
                          dec_str(r.get("pe")) if r.get("pe") is not None else "",
                          r["pe_day"].isoformat() if r.get("pe_day") else "", r["limit"],
-                         r["up_price"] or "", r["down_price"] or "", r["ma60"] or "", r["ma120"] or "", r["ma240"] or "",
-                         r["ma_alert"], yn(r["half_alert"]), yn(r["year_alert"]), r["ma_state"], r["source"]])
+                         r["up_price"] or "", r["down_price"] or "", r["ma5"] if r["ma5"] is not None else "", r["ma20"] if r["ma20"] is not None else "", r["ma60"] or "", r["ma120"] or "", r["ma240"] or "",
+                         r["ma_alert"], yn(r["ma5_alert"]), yn(r["ma20_alert"]), yn(r["half_alert"]), yn(r["year_alert"]), r["ma_state"], r["source"]])
     return ("\ufeff"+f.getvalue()).encode("utf-8")

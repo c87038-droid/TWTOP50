@@ -18,7 +18,8 @@ st.set_page_config(
 )
 
 # 雙檔版本驗證：即使 GitHub 只更新 app.py，仍能顯示可理解的錯誤，而非 ImportError。
-WEB_BUILD = "20261108-R11-AUTOFIT"
+WEB_BUILD = "20261108-R13-MA-ALERT"
+EXPECTED_DATA_BUILD = "20261108-R13-MA-ALERT"
 REQUIRED = (
     "TOP", "CANDIDATES", "HistoryStore", "MisClient", "apply_mis", "csv_bytes",
     "dec_str", "enrich", "fetch_official", "fetch_pe_snapshot", "attach_pe",
@@ -26,6 +27,10 @@ REQUIRED = (
     "fetch_official_index", "fetch_live_index", "resolve_index",
 )
 missing = [name for name in REQUIRED if not hasattr(md, name)]
+if not missing and getattr(md, "DATA_BUILD", None) != EXPECTED_DATA_BUILD:
+    st.error("手機版 R13 需要同步更新 market_data.py，請勿只更新 app.py。")
+    st.info("請將 R13 ZIP 中的 app.py、market_data.py 一起上傳到 GitHub 資料庫根目錄並 Commit changes。")
+    st.stop()
 if missing:
     st.error("GitHub 上的 app.py 與 market_data.py 不是同一個版本，網站暫時無法啟動。")
     st.markdown("**修復方法：**請把修正版的 `app.py` 和 `market_data.py` 兩個檔案一起覆蓋到 GitHub 資料庫的最外層，再按 `Commit changes`。")
@@ -305,6 +310,14 @@ div[data-testid="stButton"] button, div[data-testid="stDownloadButton"] button {
   .stock-row .ma {column-gap:12px}
 }
 
+/* R13 短期均線標示：字型、字級維持 R12；只增加顏色及底色。 */
+.stock-row .ma span.ma5-hit {background:#e0ecff;border:1px solid #98baf3;color:#164b99;border-radius:7px;padding:1px 6px;font-weight:800}
+.stock-row .ma span.ma20-hit {background:#dff8ee;border:1px solid #87cbb7;color:#086855;border-radius:7px;padding:1px 6px;font-weight:800}
+.stock-row .ma span.ma5-hit strong {color:#164b99}
+.stock-row .ma span.ma20-hit strong {color:#086855}
+.stock-row.ma-short5:not(.limit-up):not(.limit-down):not(.ma-half):not(.ma-year):not(.ma-both) {border-left-color:#4b83c9;background:#f0f6ff}
+.stock-row.ma-short20:not(.limit-up):not(.limit-down):not(.ma-half):not(.ma-year):not(.ma-both) {border-left-color:#28a38c;background:#edfdf7}
+.stock-row .warn {overflow-wrap:anywhere}
 </style>
 """, unsafe_allow_html=True)
 
@@ -453,6 +466,8 @@ def stock_html(row):
     css = []
     if "漲停" in row["limit"]: css.append("limit-up")
     elif "跌停" in row["limit"]: css.append("limit-down")
+    if row.get("ma5_alert"): css.append("ma-short5")
+    if row.get("ma20_alert"): css.append("ma-short20")
     if row["half_alert"] and row["year_alert"]: css.append("ma-both")
     elif row["year_alert"]: css.append("ma-year")
     elif row["half_alert"]: css.append("ma-half")
@@ -464,12 +479,12 @@ def stock_html(row):
 <div class="price"><div class="price-value">{fmt(row['price'])}</div><div class="change {change_class}">{pct} ({delta})</div><div class="pe-inline">本益比 <strong>{pe}</strong></div></div>
 <div class="cap">{fmt(row['cap'],1)}<div class="cap-label">億元市值</div></div>
 <div class="flags"><div class="flag {'up' if '漲停' in row['limit'] else 'down' if '跌停' in row['limit'] else 'plain'}">{text_limit}</div><div class="warn">{alert}</div></div>
-<div class="ma"><span><strong>季線</strong> {fmt(row['ma60'])}</span><span><strong>半年線</strong> {fmt(row['ma120'])}</span><span><strong>年線</strong> {fmt(row['ma240'])}</span></div>
+<div class="ma"><span class="{'ma5-hit' if row.get('ma5_alert') else ''}"><strong>{'⚠ ' if row.get('ma5_alert') else ''}5日線</strong> {fmt(row['ma5'])}</span><span class="{'ma20-hit' if row.get('ma20_alert') else ''}"><strong>{'⚠ ' if row.get('ma20_alert') else ''}20日線</strong> {fmt(row['ma20'])}</span><span><strong>季線</strong> {fmt(row['ma60'])}</span><span><strong>半年線</strong> {fmt(row['ma120'])}</span><span><strong>年線</strong> {fmt(row['ma240'])}</span></div>
 <div class="info">{meta}</div>
 </div>'''
 
 
-st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 三條均線 · 大盤漲跌 · R11 手機最適欄寬／列高版</div>', unsafe_allow_html=True)
+st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 五條均線 · 大盤漲跌 · R13 短期均線警示版</div>', unsafe_allow_html=True)
 
 
 @st.fragment(run_every="15s")
@@ -498,13 +513,13 @@ def live_board():
 
     trade_days = sorted({r["quote_day"].isoformat() for r in records})
     ma_ready = sum(1 for r in records if r["ma120"] is not None and r["ma240"] is not None)
-    alert_count = sum(1 for r in records if r["half_alert"] or r["year_alert"])
+    alert_count = sum(1 for r in records if r["half_alert"] or r["year_alert"] or r.get("ma5_alert") or r.get("ma20_alert"))
     limit_count = sum(1 for r in records if "漲停" in r["limit"] or "跌停" in r["limit"])
     st.markdown(
         '<div class="summarybar">'
         f'<div class="summarybox"><span class="metric-label">目前模式</span><span class="metric-value">{escape(mode)}</span></div>'
         f'<div class="summarybox"><span class="metric-label">市值排名</span><span class="metric-value">{len(records)} / 50</span></div>'
-        f'<div class="summarybox"><span class="metric-label">半年／年線警示</span><span class="metric-value">{alert_count} 檔</span></div>'
+        f'<div class="summarybox"><span class="metric-label">均線警示</span><span class="metric-value">{alert_count} 檔</span></div>'
         f'<div class="summarybox"><span class="metric-label">均線已備齊</span><span class="metric-value">{ma_ready} / 50</span></div>'
         '</div>', unsafe_allow_html=True)
     st.caption(f"台灣時間 {now_tw():%Y-%m-%d %H:%M:%S} · 資料日期：{'、'.join(trade_days)} · 本輪今日有效成交：{fresh} 檔 · 漲跌停／推估：{limit_count} 檔")
@@ -515,15 +530,18 @@ def live_board():
     with col_search:
         search = st.text_input("搜尋股票", placeholder="輸入代號或公司名稱（預設顯示 50 名）", key="stock_filter")
     with col_filter:
-        selected = st.selectbox("快速篩選", ["全部50名", "≤半年線", "≤年線", "同時≤兩線", "漲停", "跌停", "均線資料不足"], key="alert_filter")
+        selected = st.selectbox("快速篩選", ["全部50名", "≤5日線", "≤20日線", "同時≤5＋20日線", "≤半年線", "≤年線", "同時≤半年＋年線", "漲停", "跌停", "均線資料不足"], key="alert_filter")
 
     visible = []
     for r in records:
         if search and search.strip().lower() not in (r["code"]+r["name"]).lower():
             continue
+        if selected == "≤5日線" and r.get("ma5_alert") is not True: continue
+        if selected == "≤20日線" and r.get("ma20_alert") is not True: continue
+        if selected == "同時≤5＋20日線" and not (r.get("ma5_alert") and r.get("ma20_alert")): continue
         if selected == "≤半年線" and r["half_alert"] is not True: continue
         if selected == "≤年線" and r["year_alert"] is not True: continue
-        if selected == "同時≤兩線" and not (r["half_alert"] and r["year_alert"]): continue
+        if selected == "同時≤半年＋年線" and not (r["half_alert"] and r["year_alert"]): continue
         if selected == "漲停" and "漲停" not in r["limit"]: continue
         if selected == "跌停" and "跌停" not in r["limit"]: continue
         if selected == "均線資料不足" and r["ma120"] is not None and r["ma240"] is not None: continue
@@ -542,10 +560,10 @@ def live_board():
             official_index_snapshot.clear()
             intraday_index_snapshot.clear()
             st.rerun(scope="fragment")
-    st.markdown(f'<div class="board-note">顯示 <strong>{len(visible)}</strong> 檔（完整排名固定 1～50；篩選不會重新編號）。紅色＝漲停、綠色＝跌停、黃色＝≤半年線、紫色＝≤年線、橘色＝同時≤兩線。<br>本益比取 TWSE／TPEx 官方最近收盤估值（非盤中即時，日期以各檔顯示為準）。均線使用 60／120／240 個交易日的未還原收盤價。資料不足時顯示「—」，不會以 0 代替。</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="board-note">顯示 <strong>{len(visible)}</strong> 檔（完整排名固定 1～50；篩選不會重新編號）。紅色＝漲停、綠色＝跌停、藍色＝≤5日線、青綠色＝≤20日線、黃色＝≤半年線、紫色＝≤年線、橘色＝同時≤半年＋年線。<br>本益比取 TWSE／TPEx 官方最近收盤估值（非盤中即時，日期以各檔顯示為準）。均線使用 5／20／60／120／240 個交易日的未還原收盤價；盤中包含目前顯示股價作為當日價格。資料不足時顯示「—」，不會以 0 代替。</div>', unsafe_allow_html=True)
 
     if visible:
-        header = '''<div class="stock-row stock-head"><div>名次</div><div>股票代碼／公司名稱</div><div>股價／本益比</div><div>市值</div><div>漲跌停／警示</div><div>季／半年／年線</div><div>資料時間</div></div>'''
+        header = '''<div class="stock-row stock-head"><div>名次</div><div>股票代碼／公司名稱</div><div>股價／本益比</div><div>市值</div><div>漲跌停／警示</div><div>5／20／季／半年／年線</div><div>資料時間</div></div>'''
         st.markdown('<div class="stock-list">'+header+''.join(stock_html(r) for r in visible)+'</div>', unsafe_allow_html=True)
     else:
         st.info("目前沒有符合篩選條件的股票，請改選『全部50名』。")
