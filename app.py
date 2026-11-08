@@ -18,7 +18,7 @@ st.set_page_config(
 )
 
 # 雙檔版本驗證：即使 GitHub 只更新 app.py，仍能顯示可理解的錯誤，而非 ImportError。
-WEB_BUILD = "20261108-R8-INDEX"
+WEB_BUILD = "20261108-R9-LARGE"
 REQUIRED = (
     "TOP", "CANDIDATES", "HistoryStore", "MisClient", "apply_mis", "csv_bytes",
     "dec_str", "enrich", "fetch_official", "fetch_pe_snapshot", "attach_pe",
@@ -108,6 +108,72 @@ h1,h2,h3 {font-family:system-ui,'Microsoft JhengHei',sans-serif}
 .stock-row .ma{font-size:12px;gap:8px;justify-content:space-between}
 .stock-row .info{font-size:11px}
 .summarybox {min-width:105px;padding:9px}.summarybox .metric-value{font-size:17px}
+}
+
+/* R9 大字體：保留 R8 行情、排名、本益比、均線演算法；以 CSS 改善閱讀性。 */
+.board-title {font-size:clamp(30px,3.3vw,43px);line-height:1.25}
+.board-subtitle {font-size:16px;line-height:1.65}
+.summarybox .metric-label {font-size:15px}
+.summarybox .metric-value {font-size:24px}
+.index-title {font-size:18px}
+.index-level {font-size:clamp(38px,6.4vw,57px)}
+.index-move {font-size:clamp(21px,3.8vw,30px)}
+.index-note {font-size:14px;line-height:1.65}
+.board-note {font-size:15px;line-height:1.7}
+.stock-row {font-size:16px;line-height:1.55;min-width:0;padding:14px 12px;row-gap:10px}
+.stock-head {font-size:14px}
+.stock-row .identity {min-width:0}
+.stock-row .rank {font-size:22px}
+.stock-row .stock-code {font-size:18px;padding:5px 8px}
+.stock-row .stock-name {font-size:20px}
+.stock-row .stock-market {font-size:14px}
+.stock-row .price-value {font-size:25px}
+.stock-row .change {font-size:15px}
+.stock-row .pe-inline {font-size:15px}
+.stock-row .pe-inline strong {font-size:18px}
+.stock-row .cap {font-size:17px}
+.stock-row .cap-label {font-size:14px}
+.stock-row .ma {font-size:15px;line-height:1.8}
+.stock-row .ma strong {font-size:15px}
+.stock-row .info {font-size:13px;line-height:1.65;overflow-wrap:anywhere}
+.stock-row .flag, .stock-row .warn {font-size:15px;line-height:1.6}
+@media (max-width:1040px) {
+  .stock-row {row-gap:9px}
+  .stock-row .pe-inline {font-size:15px;letter-spacing:normal}
+  .stock-row .pe-inline strong {font-size:18px}
+}
+@media (max-width:560px) {
+  .block-container {padding-left:10px;padding-right:10px}
+  .board-title {font-size:29px}
+  .board-subtitle {font-size:15px}
+  .index-card {padding:15px 12px}
+  .index-level {font-size:36px}
+  .index-move {font-size:21px;white-space:normal}
+  .index-note {font-size:13px}
+  .summarybox {min-width:calc(50% - 6px);padding:11px}
+  .summarybox .metric-label {font-size:14px}
+  .summarybox .metric-value {font-size:19px;overflow-wrap:anywhere}
+  .stock-row {
+    grid-template-columns:30px minmax(0,1fr) minmax(112px,auto);
+    grid-template-areas:"rank identity price" "rank identity cap" "flags flags flags" "ma ma ma" "quote quote quote";
+    gap:8px 7px;padding:13px 10px
+  }
+  .stock-row .rank {font-size:20px}
+  .stock-row .identity {overflow-wrap:anywhere}
+  .stock-row .stock-name {font-size:19px}
+  .stock-row .stock-code {font-size:17px;padding:4px 7px}
+  .stock-row .identity-line {gap:6px}
+  .stock-row .price-value {font-size:23px}
+  .stock-row .change {font-size:14px;white-space:normal}
+  .stock-row .pe-inline {font-size:14px;white-space:normal}
+  .stock-row .pe-inline strong {font-size:16px}
+  .stock-row .cap {font-size:15px}
+  .stock-row .cap-label {font-size:12px}
+  .stock-row .ma {font-size:15px;justify-content:flex-start;gap:4px 15px;flex-wrap:wrap}
+  .stock-row .ma strong {font-size:15px}
+  .stock-row .flag, .stock-row .warn {font-size:15px}
+  .stock-row .info {font-size:13px}
+  .board-note {font-size:14px}
 }
 </style>
 """, unsafe_allow_html=True)
@@ -273,7 +339,7 @@ def stock_html(row):
 </div>'''
 
 
-st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 三條均線 · 大盤漲跌 · R8 修正版</div>', unsafe_allow_html=True)
+st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 三條均線 · 大盤漲跌 · R9 大字體版</div>', unsafe_allow_html=True)
 
 
 @st.fragment(run_every="15s")
