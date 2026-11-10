@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # 雙檔版本驗證：即使 GitHub 只更新 app.py，仍能顯示可理解的錯誤，而非 ImportError。
-WEB_BUILD = "20261110-R22-MOBILE-FAST"
+WEB_BUILD = "20261110-R26-INLINE-PURE-RED-DEEP-GREEN"
 EXPECTED_DATA_BUILD = "20261110-R22-MOBILE-FAST"
 REQUIRED = (
     "TOP", "CANDIDATES", "HistoryStore", "MisClient", "apply_mis", "csv_bytes",
@@ -85,7 +85,7 @@ h1,h2,h3 {font-family:system-ui,'Microsoft JhengHei',sans-serif}
 .stock-row .info {font-size:11px;color:#6e8298;line-height:1.5}
 .stock-row .flag {font-size:12px;font-weight:750;line-height:1.5}
 .stock-row .warn {font-size:12px;font-weight:800;line-height:1.45}
-.stock-row.limit-up {background:#ffe9ec;border-left-color:#d32d48}
+.stock-row.limit-up {background:#D60000;border-left-color:#8C0000;border-color:#B50000}
 .stock-row.limit-down {background:#e4f7eb;border-left-color:#159768}
 .stock-row.ma-half:not(.limit-up):not(.limit-down) {background:#fff6d7;border-left-color:#d99a10}
 .stock-row.ma-year:not(.limit-up):not(.limit-down) {background:#f4eaff;border-left-color:#865bc7}
@@ -329,6 +329,112 @@ div[data-testid="stButton"] button, div[data-testid="stDownloadButton"] button {
 .stock-row.ma-short5:not(.limit-up):not(.limit-down):not(.ma-half):not(.ma-year):not(.ma-both) {border-left-color:#4b83c9;background:#f0f6ff}
 .stock-row.ma-short20:not(.limit-up):not(.limit-down):not(.ma-half):not(.ma-year):not(.ma-both) {border-left-color:#28a38c;background:#edfdf7}
 .stock-row .warn {overflow-wrap:anywhere}
+
+/* R23：漲停採正紅色底搭配白字；不更動字型、字級、欄寬與資料流程。 */
+.stock-row.limit-up {background:#D60000;border-color:#B50000;border-left-color:#8C0000;color:#FFFFFF}
+.stock-row.limit-up .rank,
+.stock-row.limit-up .stock-name,
+.stock-row.limit-up .stock-market,
+.stock-row.limit-up .price-value,
+.stock-row.limit-up .change,
+.stock-row.limit-up .cap,
+.stock-row.limit-up .cap-label,
+.stock-row.limit-up .flag,
+.stock-row.limit-up .warn,
+.stock-row.limit-up .pe-inline,
+.stock-row.limit-up .pe-inline strong,
+.stock-row.limit-up .ma,
+.stock-row.limit-up .ma strong,
+.stock-row.limit-up .info {color:#FFFFFF}
+.stock-row.limit-up .stock-code {background:#9F0000;color:#FFFFFF;border-color:#FFFFFF88}
+.stock-row.limit-up .ma {border-top-color:#FFFFFF88}
+.stock-row.limit-up .ma span.ma5-hit {background:#E0ECFF;color:#164B99;border-color:#98BAF3}
+.stock-row.limit-up .ma span.ma5-hit strong {color:#164B99}
+.stock-row.limit-up .ma span.ma20-hit {background:#DFF8EE;color:#086855;border-color:#87CBB7}
+.stock-row.limit-up .ma span.ma20-hit strong {color:#086855}
+
+/* R24：僅調整顏色，維持手機原有字型、字級、欄高、欄寬與行情計算。
+   大盤上漲 #D60000 / 下跌 #006B3C，在淺色底上呈現，避免深色卡片對比不足。 */
+.index-move.index-up {color:#D60000;background:#FFF8F8;border-radius:8px;padding:2px 9px}
+.index-move.index-down {color:#006B3C;background:#F5FFF9;border-radius:8px;padding:2px 9px}
+/* 跌停整列深綠色、白字；漲停整列仍是原有正紅色。 */
+.stock-row.limit-down {background:#006B3C;border-color:#00512E;border-left-color:#003A22;color:#FFFFFF}
+.stock-row.limit-down .rank,
+.stock-row.limit-down .stock-name,
+.stock-row.limit-down .stock-market,
+.stock-row.limit-down .price-value,
+.stock-row.limit-down .change,
+.stock-row.limit-down .cap,
+.stock-row.limit-down .cap-label,
+.stock-row.limit-down .flag,
+.stock-row.limit-down .warn,
+.stock-row.limit-down .pe-inline,
+.stock-row.limit-down .pe-inline strong,
+.stock-row.limit-down .ma,
+.stock-row.limit-down .ma strong,
+.stock-row.limit-down .info,
+.stock-row.limit-down .up,
+.stock-row.limit-down .down,
+.stock-row.limit-down .plain {color:#FFFFFF}
+.stock-row.limit-down .stock-code {background:#004629;color:#FFFFFF;border-color:#FFFFFF88}
+.stock-row.limit-down .ma {border-top-color:#FFFFFF88}
+/* 保留5日與20日線獨立警示底色，文字需有足夠對比。 */
+.stock-row.limit-down .ma span.ma5-hit {background:#E0ECFF;color:#164B99;border-color:#98BAF3}
+.stock-row.limit-down .ma span.ma5-hit strong {color:#164B99}
+.stock-row.limit-down .ma span.ma20-hit {background:#DFF8EE;color:#086855;border-color:#87CBB7}
+.stock-row.limit-down .ma span.ma20-hit strong {color:#086855}
+/* R25：只調整手機版漲跌停整張卡片的飽和底色。
+   用 !important 避免前版樣式、瀏覽器主題或額外狀態樣式蓋掉底色。
+   字體、欄寬與任何行情計算均不更動。 */
+.stock-row.limit-up {
+  background: #FF0000 !important; background-image: none !important;
+  border-color: #B80000 !important; border-left-color: #890000 !important;
+}
+.stock-row.limit-down {
+  background: #006400 !important; background-image: none !important;
+  border-color: #004B00 !important; border-left-color: #003800 !important;
+}
+.stock-row.limit-up,
+.stock-row.limit-down,
+.stock-row.limit-up :is(.rank,.stock-name,.stock-market,.price-value,.change,.cap,.cap-label,.flag,.warn,.pe-inline,.pe-inline strong,.ma,.ma strong,.info,.up,.down,.plain),
+.stock-row.limit-down :is(.rank,.stock-name,.stock-market,.price-value,.change,.cap,.cap-label,.flag,.warn,.pe-inline,.pe-inline strong,.ma,.ma strong,.info,.up,.down,.plain) {
+  color: #FFFFFF !important;
+}
+.stock-row.limit-up .stock-code {background:#AE0000 !important;color:#FFFFFF !important;border-color:#FFFFFFAA !important}
+.stock-row.limit-down .stock-code {background:#004500 !important;color:#FFFFFF !important;border-color:#FFFFFFAA !important}
+.stock-row.limit-up .ma,.stock-row.limit-down .ma {border-top-color:#FFFFFF88 !important}
+/* 短均線警示小標籤保持原有淺底與深字，以利辨識。 */
+.stock-row:is(.limit-up,.limit-down) .ma .ma5-hit,
+.stock-row:is(.limit-up,.limit-down) .ma .ma5-hit strong {color:#164B99 !important}
+.stock-row:is(.limit-up,.limit-down) .ma .ma20-hit,
+.stock-row:is(.limit-up,.limit-down) .ma .ma20-hit strong {color:#086855 !important}
+
+/* R26：最後一道色彩保護，確保手機卡片整張顯示正紅／深綠，而非粉紅或淺綠。
+   不改字型、字級、格線、排行及報價邏輯。 */
+.stock-row[data-card-status="limit-up"] {
+  background:#FF0000 !important; background-color:#FF0000 !important;
+  background-image:none !important; border-color:#B00000 !important;
+}
+.stock-row[data-card-status="limit-down"] {
+  background:#006400 !important; background-color:#006400 !important;
+  background-image:none !important; border-color:#004B00 !important;
+}
+.stock-row[data-card-status="limit-up"] :is(.rank,.stock-name,.stock-market,.price-value,.change,.cap,.cap-label,.flag,.warn,.pe-inline,.pe-inline strong,.ma,.ma strong,.info,.up,.down,.plain),
+.stock-row[data-card-status="limit-down"] :is(.rank,.stock-name,.stock-market,.price-value,.change,.cap,.cap-label,.flag,.warn,.pe-inline,.pe-inline strong,.ma,.ma strong,.info,.up,.down,.plain) {
+  color:#FFFFFF !important;
+}
+/* 紅／綠卡片上的小標籤也不再保留淡粉／淺綠色塊。 */
+.stock-row[data-card-status="limit-up"] :is(.stock-code,.ma .ma5-hit,.ma .ma20-hit),
+.stock-row[data-card-status="limit-down"] :is(.stock-code,.ma .ma5-hit,.ma .ma20-hit) {
+  background:transparent !important; background-image:none !important;
+  color:#FFFFFF !important; border-color:#FFFFFFAA !important;
+}
+.stock-row[data-card-status="limit-up"] :is(.ma .ma5-hit strong,.ma .ma20-hit strong),
+.stock-row[data-card-status="limit-down"] :is(.ma .ma5-hit strong,.ma .ma20-hit strong) {
+  color:#FFFFFF !important;
+}
+.stock-row[data-card-status="limit-up"] .ma,
+.stock-row[data-card-status="limit-down"] .ma { border-top-color:#FFFFFF88 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -601,8 +707,23 @@ def stock_html(row):
     pe = f"{fmt(row['pe'])} 倍" if row.get("pe") is not None else "—"
     pe_time = f" · 本益比基準 {row['pe_day']}" if row.get("pe_day") else ""
     css = []
-    if "漲停" in row["limit"]: css.append("limit-up")
-    elif "跌停" in row["limit"]: css.append("limit-down")
+    # R26: 卡片本身直接指定背景色，避免全域樣式覆蓋成淺粉紅或淺綠。
+    # 「推估漲停／推估跌停」仍保留「推估」文字，但套用相應卡片顏色。
+    limit_label = str(row.get("limit") or "")
+    if "漲停" in limit_label:
+        css.append("limit-up")
+        card_style = (' style="background:#FF0000 !important;background-color:#FF0000 !important;'
+                      'background-image:none !important;color:#FFFFFF !important;'
+                      'border:1px solid #B00000 !important;border-left:6px solid #890000 !important"'
+                      ' data-card-status="limit-up"')
+    elif "跌停" in limit_label:
+        css.append("limit-down")
+        card_style = (' style="background:#006400 !important;background-color:#006400 !important;'
+                      'background-image:none !important;color:#FFFFFF !important;'
+                      'border:1px solid #004B00 !important;border-left:6px solid #003800 !important"'
+                      ' data-card-status="limit-down"')
+    else:
+        card_style = '' 
     if row.get("ma5_alert"): css.append("ma-short5")
     if row.get("ma20_alert"): css.append("ma-short20")
     if row["half_alert"] and row["year_alert"]: css.append("ma-both")
@@ -611,7 +732,7 @@ def stock_html(row):
     css = " ".join(css)
     quality_text = str(row.get("quality_status") or "尚未驗證")
     meta = escape(f"{row['quote_day']} {row['quote_time']} · {quality_text} · {row['source']} · {row['ma_state']}{pe_time}")
-    return f'''<div class="stock-row {css}">
+    return f'''<div class="stock-row {css}"{card_style}>
 <div class="rank">{row['rank']}</div>
 <div class="identity"><div class="identity-line"><span class="stock-code" aria-label="股票代碼 {code}">{code}</span><span class="stock-name">{name}</span></div><div class="stock-market">{market}</div></div>
 <div class="price"><div class="price-value">{fmt(row['price'])}</div><div class="change {change_class}">{pct} ({delta})</div></div>
@@ -623,7 +744,7 @@ def stock_html(row):
 </div>'''
 
 
-st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 五條均線 · 大盤漲跌 · R22 背景抓取快速更新版（保留本益比右移）</div>', unsafe_allow_html=True)
+st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 五條均線 · 大盤漲跌 · R26 正紅／深綠滿版卡片（含推估漲跌停；保留 R22 快速報價）</div>', unsafe_allow_html=True)
 st.caption("免費資料顯示｜查詢時間 ≠ 成交時間；人工交叉核對：[HiStock 台股排行](https://histock.tw/stock/rank.aspx)（不作為自動抓取來源）。")
 
 
