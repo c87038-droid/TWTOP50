@@ -40,7 +40,7 @@ OFFICIAL_HOSTS = frozenset({"openapi.twse.com.tw", "www.tpex.org.tw", "mis.twse.
 BILLION = Decimal("100000000")
 MA_WINDOWS = (5, 20, 60, 120, 240)
 TOP = 50
-DATA_BUILD = "20261110-R21-INDEX-REFRESH"
+DATA_BUILD = "20261110-R22-MOBILE-FAST"
 CANDIDATES = 200
 
 
@@ -512,60 +512,41 @@ def market_limits(row):
 
 
 class MisClient:
-    def __init__(self):
-        self.agent = opener(cookie=True)
-        self.primed = False
+    """並行抓取盤中股票報價；成功批次即採用，失敗留待下一輪。
 
-    def warmup(self):
-        if self.primed: return
-        self.primed = True
-        try:
-            req = Request(MIS_ROOT, headers={"User-Agent": "Mozilla/5.0"})
-            with self.agent.open(req, timeout=8) as rsp:
-                rsp.read(128)
-        except Exception:
-            pass
-
+    平行僅改善取得時間，不能縮短免費行情來源本身的發布延遲。
+    """
     def fetch(self, candidates):
-        """Batch-isolated MIS fetch. A single failed batch must not erase good quotes.
-
-        Return (messages, warnings). Retry a failed batch once with smaller groups;
-        expose failures if nothing usable was received. Public MIS is best effort.
-        """
-        self.warmup()
-        msgs, warnings = [], []
+        from concurrent.futures import as_completed
+        groups = [candidates[i:i+25] for i in range(0, len(candidates), 25)]
 
         def retrieve(group):
-            symbols = "|".join(("tse" if r["market"] == "上市" else "otc") + "_" + r["code"] + ".tw" for r in group)
-            query = urlencode({"ex_ch": symbols, "json": 1, "delay": 0, "_": int(time.time()*1000)})
-            request = Request(MIS_QUOTES + "?" + query,
-                              headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                                       "Accept": "application/json, */*", "Referer": MIS_ROOT})
-            with self.agent.open(request, timeout=10) as rsp:
-                data = json.load(rsp)
-            if not isinstance(data, dict) or not isinstance(data.get("msgArray"), list):
-                raise ValueError("MIS 回傳的 msgArray 不是陣列")
-            return [r for r in data["msgArray"] if isinstance(r, dict)]
+            symbols = "|".join(
+                ("tse" if r["market"] == "上市" else "otc") + "_" + r["code"] + ".tw"
+                for r in group)
+            request = Request(
+                MIS_QUOTES + "?" + urlencode({"ex_ch": symbols, "json": 1, "delay": 0,
+                                               "_": int(time.time()*1000)}),
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                         "Accept": "application/json, */*", "Referer": MIS_ROOT})
+            client = opener(cookie=True)
+            with client.open(request, timeout=5) as rsp:
+                payload = json.load(rsp)
+            if not isinstance(payload, dict) or not isinstance(payload.get("msgArray"), list):
+                raise ValueError("MIS 資料格式異常")
+            return [x for x in payload["msgArray"] if isinstance(x, dict)]
 
-        for i in range(0, len(candidates), 40):
-            group = candidates[i:i+40]
-            try:
-                msgs.extend(retrieve(group))
-            except Exception as exc:
-                # Recover from request-length and transient network failures.
-                recovered = 0
-                for j in range(0, len(group), 10):
-                    try:
-                        block = retrieve(group[j:j+10])
-                        recovered += len(block)
-                        msgs.extend(block)
-                    except Exception as sub_exc:
-                        warnings.append(f"MIS 第{i+j+1}～{min(i+j+10,len(candidates))}檔無法連線：{str(sub_exc)[:90]}")
-                if not recovered:
-                    warnings.append(f"MIS 第{i+1}～{min(i+40,len(candidates))}檔失敗：{str(exc)[:90]}")
-        if not msgs:
-            raise RuntimeError("MIS 所有批次都沒有有效回應；" + "；".join(warnings[:2]))
-        return msgs, warnings
+        messages, errors = [], []
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            jobs = {pool.submit(retrieve, group): i for i, group in enumerate(groups)}
+            for job in as_completed(jobs):
+                try:
+                    messages.extend(job.result())
+                except Exception as exc:
+                    errors.append(f"第{jobs[job]+1}組：{str(exc)[:90]}")
+        if not messages:
+            raise RuntimeError("MIS 沒有成功的盤中報價批次：" + "；".join(errors[:3]))
+        return messages, errors
 
 
 def fetch_backup_intraday(candidates, at, max_symbols=80):

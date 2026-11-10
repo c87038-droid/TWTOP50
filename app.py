@@ -7,6 +7,7 @@ import threading
 import time
 import hashlib
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
@@ -20,8 +21,8 @@ st.set_page_config(
 )
 
 # 雙檔版本驗證：即使 GitHub 只更新 app.py，仍能顯示可理解的錯誤，而非 ImportError。
-WEB_BUILD = "20261110-R21-INDEX-REFRESH"
-EXPECTED_DATA_BUILD = "20261110-R21-INDEX-REFRESH"
+WEB_BUILD = "20261110-R22-MOBILE-FAST"
+EXPECTED_DATA_BUILD = "20261110-R22-MOBILE-FAST"
 REQUIRED = (
     "TOP", "CANDIDATES", "HistoryStore", "MisClient", "apply_mis", "csv_bytes",
     "dec_str", "enrich", "fetch_official", "fetch_pe_snapshot", "attach_pe",
@@ -30,8 +31,8 @@ REQUIRED = (
 )
 missing = [name for name in REQUIRED if not hasattr(md, name)]
 if not missing and getattr(md, "DATA_BUILD", None) != EXPECTED_DATA_BUILD:
-    st.error("手機版 R19 需要同步更新 market_data.py，請勿只更新 app.py。")
-    st.info("請將 R19 ZIP 中的 app.py、market_data.py 一起上傳到 GitHub 資料庫根目錄並 Commit changes。")
+    st.error("手機版 R22 需要同步更新 market_data.py，請勿只更新 app.py。")
+    st.info("請將 R22 ZIP 中的 app.py、market_data.py 一起上傳到 GitHub 資料庫根目錄並 Commit changes。")
     st.stop()
 if missing:
     st.error("GitHub 上的 app.py 與 market_data.py 不是同一個版本，網站暫時無法啟動。")
@@ -342,66 +343,98 @@ def get_licensed_key():
         return ''
 
 
-@st.cache_data(ttl=15, show_spinner=False)
-def licensed_snapshot(key_hash, _key):
-    # The key itself is not a visible Streamlit cache argument.
-    return fetch_licensed_snapshots(_key)
+class AsyncQuoteFeed:
+    """Background I/O with last-good snapshots; never block a fragment rerun.
+
+    A completed fetch updates the in-memory snapshot; pending / failed jobs
+    preserve existing values but do not change their *source timestamps*.
+    """
+    def __init__(self):
+        self.pool = ThreadPoolExecutor(max_workers=7, thread_name_prefix="top50-mobile")
+        self.lock = threading.RLock()
+        self.slots = {}
+
+    def request(self, name, fetcher, ttl=15, retry=30):
+        now = time.monotonic()
+        with self.lock:
+            slot = self.slots.setdefault(name, {
+                "value": None, "future": None, "completed": 0.0,
+                "checked": 0.0, "error": "", "duration": None,
+            })
+            future = slot["future"]
+            if future is not None and future.done():
+                slot["future"] = None
+                slot["checked"] = now
+                try:
+                    payload, elapsed = future.result()
+                    slot["value"] = payload
+                    slot["completed"] = now
+                    slot["duration"] = elapsed
+                    slot["error"] = ""
+                except Exception as exc:
+                    slot["error"] = str(exc)[:125]
+            if slot["future"] is None:
+                interval = ttl if slot["completed"] >= slot["checked"] and slot["completed"] else retry
+                if not slot["checked"] or (now-slot["checked"] >= interval):
+                    def run():
+                        started = time.monotonic()
+                        return fetcher(), time.monotonic()-started
+                    slot["future"] = self.pool.submit(run)
+                    slot["checked"] = now
+            return slot["value"], slot["future"] is not None, slot["error"]
+
+    def invalidate(self):
+        with self.lock:
+            for slot in self.slots.values():
+                slot["completed"] = 0
+                slot["checked"] = 0
+
+    def summary(self):
+        with self.lock:
+            entries=[]
+            for key, slot in self.slots.items():
+                state = "抓取中" if slot["future"] is not None else "已取得" if slot["value"] is not None else "尚未取得"
+                if slot["error"]:
+                    state += "／失敗：" + slot["error"][:75]
+                if slot["duration"] is not None:
+                    state += f"（上次成功耗時 {slot['duration']:.1f} 秒）"
+                entries.append(f"{key}：{state}")
+            return entries
+
+
+@st.cache_resource(show_spinner=False)
+def quote_feed():
+    return AsyncQuoteFeed()
 
 
 def get_licensed_today():
     key = get_licensed_key()
     if not key:
         return {}, None, []
-    hashed = hashlib.sha256(key.encode('utf-8')).hexdigest()[:12]
-    return licensed_snapshot(f'{hashed}_{int(time.time()//15)}', key)
-
-
-@st.cache_data(ttl=120, show_spinner=False)
-def official_snapshot():
-    return fetch_official()
-
-
-@st.cache_data(ttl=15, show_spinner=False)
-def mis_snapshot(key: str, _candidates):
-    # key=日期/候選名單內容；_candidates 不納入快取鍵，避免每次複製大量 Decimal。
-    return MisClient().fetch(_candidates)
-
-
-@st.cache_data(ttl=180, show_spinner=False)
-def backup_snapshot(key: str, _candidates, _at):
-    # 盤中 MIS 受限才啟用。備援可能延遲，每 180 秒最多查一次，避免雲端被限流。
-    return fetch_backup_intraday(_candidates, _at, max_symbols=80)
-
-
-@st.cache_data(ttl=600, show_spinner=False)
-def pe_snapshot():
-    return fetch_pe_snapshot()
-
-
-@st.cache_data(ttl=120, show_spinner=False)
-def official_index_snapshot():
-    return fetch_official_index()
-
-
-@st.cache_data(ttl=15, show_spinner=False)
-def intraday_index_snapshot():
-    return fetch_live_index()
+    digest = hashlib.sha256(key.encode()).hexdigest()[:12]
+    result, pending, error = quote_feed().request(
+        "授權行情_" + digest, lambda: fetch_licensed_snapshots(key), ttl=15, retry=45)
+    if result is not None:
+        return result
+    return {}, None, ["授權行情" + ("連線中" if pending else ": " + error)]
 
 
 def index_card(at):
     """獨立顯示大盤：排行／本益比即使出錯也不影響大盤資訊。"""
     close = live = None
     issues = []
-    try:
-        close = official_index_snapshot()
-    except Exception as exc:
-        issues.append("官方收盤來源：" + str(exc)[:90])
-    # 僅盤中擷取盤中指數；收盤後只呈現官方正式收盤資料。
+    feed = quote_feed()
+    close, waiting_close, error_close = feed.request(
+        "大盤_官方收盤", fetch_official_index,
+        ttl=120 if is_after_close(at) else 1800, retry=35)
+    if error_close:
+        issues.append("官方收盤來源：" + error_close[:90])
+    # 盤中獨立查詢，慢速官方資料不會擋住大盤或個股畫面。
     if is_session(at):
-        try:
-            live = intraday_index_snapshot()
-        except Exception as exc:
-            issues.append("盤中來源：" + str(exc)[:90])
+        live, waiting_live, error_live = feed.request(
+            "大盤_盤中", fetch_live_index, ttl=15, retry=25)
+        if error_live:
+            issues.append("盤中來源：" + error_live[:90])
     status = resolve_index(close, live, at)
     if get_licensed_key() and is_session(at):
         _, licensed_index, license_warnings = get_licensed_today()
@@ -412,7 +445,7 @@ def index_card(at):
         elif is_session(at):
             issues.extend(license_warnings[:2])
     if not status:
-        st.warning("加權指數目前無法取得，排行榜仍可獨立使用。" + ("；".join(issues)[:160] if issues else ""))
+        st.warning("加權指數正在背景讀取；資料尚未取得時不會顯示猜測值。" + ("；".join(issues)[:160] if issues else ""))
         return
     delta = status["delta"]
     pct = status["pct"]
@@ -447,16 +480,23 @@ def resources():
 
 def build_board(state, at):
     warnings = []
-    try:
-        official = official_snapshot()
+    feed = quote_feed()
+    # 正式收盤資料比盤中報價慢，而且只在盤後變動：獨立背景更新。
+    official_ttl = 150 if is_after_close(at) else (1800 if is_session(at) else 3600)
+    official, waiting_official, error_official = feed.request(
+        "全市場_官方收盤_" + str(at.date()), fetch_official,
+        ttl=official_ttl, retry=45)
+    if official is not None:
         with state["lock"]:
             state["last_official"] = official
-    except Exception as exc:
+    else:
         with state["lock"]:
             official = state["last_official"]
         if official is None:
-            raise RuntimeError(f"暫時無法取得官方排行榜：{str(exc)[:180]}") from exc
-        warnings.append("官方資料來源目前連線異常，沿用伺服器上次成功取得的官方資料。")
+            raise RuntimeError("正在背景讀取全市場正式收盤資料，尚未取得可顯示的名單。請保持網頁開啟；" +
+                               ("連線異常：" + error_official if error_official else "來源讀取中"))
+    if error_official:
+        warnings.append("官方全市場資料暫時未成功更新：" + error_official + "；已明確保留原始行情日期。")
 
     for issue in official.get("source_errors", []):
         warnings.append("⚠ 指定日期來源：" + issue)
@@ -472,41 +512,38 @@ def build_board(state, at):
     # 盤中：用免費 MIS / 備援行情；盤後：一律回到 TWSE+TPEx 官方收盤資料。
     if is_session(at):
         candidates = base[:CANDIDATES]
-        # Include the 15-second interval in the cache key, ensuring a new quote
-        # request even if some previous viewer previously filled the cache.
-        key = (f"{official['listed_date']}_{official['otc_date']}_"
-               + "-".join(x["code"] for x in candidates[:5])
-               + f"_{int(time.time() // 15)}")
-        try:
-            messages, partial_errors = mis_snapshot(key, candidates)
-            mixed, fresh = apply_mis(candidates, messages, at)
+        # 200檔盤中報價獨立在背景取回；每15秒可啟動新一輪，
+        # 不等待慢速官方 / 本益比 / 備援抓取，也不因網路卡住而凍結網頁。
+        messages_pack, waiting_mis, error_mis = feed.request(
+            "個股_MIS_" + str(at.date()),
+            lambda snapshot=[dict(r) for r in candidates]: MisClient().fetch(snapshot),
+            ttl=15, retry=25)
+        if messages_pack is not None:
+            messages, partial_errors = messages_pack
+            universe, fresh = apply_mis(candidates, messages, at)
             if partial_errors:
-                warnings.append(f"MIS 有 {len(partial_errors)} 組更新失敗，其餘成功報價已採用。" + "；".join(partial_errors[:2]))
-            universe = mixed
+                warnings.append(f"MIS 有 {len(partial_errors)} 組失敗，其餘成功報價已採用。" + "；".join(partial_errors[:2]))
             if fresh:
-                mode = "盤中最新成交估算" if is_session(at) else "盤後最後成交（待官方確認）"
-                if not is_session(at):
-                    warnings.append("當日正式收盤資料尚未同步，顯示最後成交價（待官方確認）。")
-            else:
-                warnings.append("MIS 沒有回傳今天的有效成交價，正在嘗試備援行情。")
-        except Exception as exc:
-            warnings.append(f"MIS 盤中報價失敗：{str(exc)[:160]}。正在嘗試備援行情。")
-
+                mode = "盤中已取得成交價估算（請看成交時間）"
+        else:
+            warnings.append("MIS 盤中報價正在背景抓取；目前顯示的舊價格仍以原始交易時間為準。")
+        if error_mis:
+            warnings.append("MIS 報價查詢失敗：" + error_mis)
         # Avoid showing a yesterday close with an apparently new refresh time.
         # Backup is a delayed minute feed: never describe it as exchange live ticks.
-        if fresh < 10:
-            try:
-                # Cache key changes on a ~75-second schedule, not each redraw.
-                backup_key = f"{at.date()}_{int(time.time() // 180)}"
-                backup = backup_snapshot(backup_key, candidates[:80], at)
+        if fresh < 20:
+            backup, waiting_backup, backup_error = feed.request(
+                "個股_備援分鐘行情_" + str(at.date()),
+                lambda snapshot=[dict(r) for r in candidates[:60]], when=at: fetch_backup_intraday(
+                    snapshot, when, max_symbols=60),
+                ttl=180, retry=90)
+            if backup is not None:
                 universe, backup_count = apply_backup_quotes(universe, backup, at)
                 if backup_count:
-                    mode = "盤中備援分鐘行情（可能延遲）" if is_session(at) else "盤後備援最後成交（待官方確認）"
-                    warnings.append(f"MIS 報價不足，已使用 {backup_count} 檔有日期、時間的備援分鐘行情；請留意延遲。")
-                elif fresh == 0:
-                    warnings.append("MIS 與備援來源目前都沒有今天的有效成交，顯示最近官方收盤價格（不是今日即時價）。")
-            except Exception as exc:
-                warnings.append(f"備援行情也無法連線：{str(exc)[:120]}；目前價格以標示的交易日為準。")
+                    mode = "盤中備援分鐘行情（可能延遲）"
+                    warnings.append(f"MIS 報價不足，已引用 {backup_count} 檔帶時間戳記的備援分鐘行情。")
+            if backup_error:
+                warnings.append("備援分鐘行情來源連線失敗：" + backup_error)
         if get_licensed_key():
             live_quotes, licensed_index, licensed_warnings = get_licensed_today()
             universe, count_licensed = merge_licensed_quotes(universe, live_quotes, at)
@@ -528,14 +565,16 @@ def build_board(state, at):
     top = universe[:TOP]
     if len(top) < TOP:
         raise RuntimeError(f"本次有效股票只有 {len(top)} 檔，不足 50。")
-    try:
-        pe_map, pe_warnings = pe_snapshot()
+    pe_result, pe_waiting, pe_error = feed.request(
+        "本益比_官方", fetch_pe_snapshot, ttl=1800, retry=90)
+    if pe_result is not None:
+        pe_map, pe_warnings = pe_result
         if pe_map:
             with state["lock"]:
                 state["last_pe_map"].update(pe_map)
         warnings.extend(pe_warnings)
-    except Exception as exc:
-        warnings.append(f"本益比來源暫時無法讀取：{str(exc)[:110]}")
+    if pe_error:
+        warnings.append("本益比來源稍後重試：" + pe_error)
     with state["lock"]:
         valuation = dict(state["last_pe_map"])
     rows = enrich(attach_pe(top, valuation), state["hist"])
@@ -584,11 +623,11 @@ def stock_html(row):
 </div>'''
 
 
-st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 五條均線 · 大盤漲跌 · R21 大盤雙來源日期驗證版（保留本益比右移）</div>', unsafe_allow_html=True)
+st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 五條均線 · 大盤漲跌 · R22 背景抓取快速更新版（保留本益比右移）</div>', unsafe_allow_html=True)
 st.caption("免費資料顯示｜查詢時間 ≠ 成交時間；人工交叉核對：[HiStock 台股排行](https://histock.tw/stock/rank.aspx)（不作為自動抓取來源）。")
 
 
-@st.fragment(run_every="15s")
+@st.fragment(run_every="10s")
 def live_board():
     state = resources()
     at = now_tw()
@@ -663,6 +702,9 @@ def live_board():
         st.write("若20分鐘內有效報價為0/50，代表無法驗證近20分鐘成交價。免費公開來源不保證連線與更新頻率；請查看資料交易日與實際成交時間。")
         if warnings:
             st.code("\n".join(warnings[:6]), language="text")
+        st.caption("背景查詢狀態（耗時是網站抓取時間，不是成交延遲）：")
+        for item in quote_feed().summary():
+            st.text(item)
     col_search, col_filter = st.columns([2, 1], gap="small")
     with col_search:
         search = st.text_input("搜尋股票", placeholder="輸入代號或公司名稱（預設顯示 50 名）", key="stock_filter")
@@ -691,13 +733,7 @@ def live_board():
                            use_container_width=True, key="csv_all")
     with tool2:
         if st.button("🔄 立即重新整理", use_container_width=True, key="manual_refresh"):
-            mis_snapshot.clear()
-            backup_snapshot.clear()
-            official_snapshot.clear()
-            pe_snapshot.clear()
-            official_index_snapshot.clear()
-            intraday_index_snapshot.clear()
-            licensed_snapshot.clear()
+            quote_feed().invalidate()
             st.rerun(scope="fragment")
     st.markdown(f'<div class="board-note">顯示 <strong>{len(visible)}</strong> 檔（完整排名固定 1～50；篩選不會重新編號）。紅色＝漲停、綠色＝跌停、藍色＝≤5日線、青綠色＝≤20日線、黃色＝≤半年線、紫色＝≤年線、橘色＝同時≤半年＋年線。<br>本益比取 TWSE／TPEx 官方最近收盤估值（非盤中即時，日期以各檔顯示為準）。均線使用 5／20／60／120／240 個交易日的未還原收盤價；盤中包含目前顯示股價作為當日價格。資料不足時顯示「—」，不會以 0 代替。</div>', unsafe_allow_html=True)
 
@@ -708,7 +744,7 @@ def live_board():
         st.info("目前沒有符合篩選條件的股票，請改選『全部50名』。")
 
     st.markdown('''<div class="board-note" style="margin-top:20px">
-<b>資料使用說明：</b>盤中每 15 秒<strong>嘗試</strong>更新，未必為零延遲逐筆成交；盤中從最近正式收盤市值前 200 名中估算前 50 名。
+<b>資料使用說明：</b>盤中每 15 秒<strong>嘗試</strong>抓取新資料，畫面每 10 秒檢查完成結果，未必為零延遲逐筆成交；盤中從最近正式收盤市值前 200 名中估算前 50 名。
 盤後優先使用 TWSE／TPEx 全市場正式收盤資料；尚未發布時會明示「待官方確認」。週末與休市日顯示最近交易日。
 均線日K採 Yahoo Finance 非官方資料，可能因連線限制而短暫缺漏；漲跌停以 MIS 當日公告價優先，只有推算價會加註「推估」。
 若公司虧損或來源未提供本益比，顯示「—」而非 0。網頁不會在沒有人開啟時持續接收行情；重新打開會重新查詢。非投資建議。
