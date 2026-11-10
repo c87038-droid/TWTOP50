@@ -40,7 +40,7 @@ OFFICIAL_HOSTS = frozenset({"openapi.twse.com.tw", "www.tpex.org.tw", "mis.twse.
 BILLION = Decimal("100000000")
 MA_WINDOWS = (5, 20, 60, 120, 240)
 TOP = 50
-DATA_BUILD = "20261109-R19-DATED-CLOSE"
+DATA_BUILD = "20261110-R21-INDEX-REFRESH"
 CANDIDATES = 200
 
 
@@ -371,19 +371,45 @@ def parse_mis_index(payload):
 
 
 def fetch_live_index():
-    errors = []
-    try:
-        return parse_intraday_index(get_json(INDEX_INTRADAY_URL, timeout=9))
-    except Exception as exc:
-        errors.append(str(exc)[:90])
-    try:
-        agent = opener(cookie=True)
-        query = urlencode({"ex_ch": "tse_t00.tw", "json": 1, "delay": 0, "_": int(time.time()*1000)})
-        return parse_mis_index(get_json(MIS_QUOTES + "?" + query, agent=agent, timeout=9))
-    except Exception as exc:
-        errors.append(str(exc)[:90])
-    raise RuntimeError("大盤盤中行情暫無法讀取：" + "；".join(errors))
+    """嘗試兩個盤中來源，逐筆核對交易日期/指數時間，再選最新有效值。
 
+    第一個來源回傳 HTTP 200 但仍是昨日資料，不代表取得今日指數。
+    """
+    at = now_tw()
+    found, errors = [], []
+    endpoints = [
+        ("TWSE 每5秒指數", lambda: parse_intraday_index(
+            get_json(INDEX_INTRADAY_URL + "&" + urlencode({"date": at.strftime("%Y%m%d"), "_": int(time.time()*1000)}), timeout=9))),
+        ("TWSE MIS t00", lambda: parse_mis_index(get_json(
+            MIS_QUOTES + "?" + urlencode({"ex_ch": "tse_t00.tw", "json": 1, "delay": 0, "_": int(time.time()*1000)}),
+            agent=opener(cookie=True), timeout=9))),
+    ]
+    for name, read in endpoints:
+        try:
+            quote = read()
+            day = quote.get("day")
+            stamp = _quote_hhmm(quote.get("time"))
+            if day != at.date():
+                errors.append(f"{name}：資料日期 {day}，不是今日 {at:%Y-%m-%d}")
+                continue
+            if stamp is None:
+                errors.append(f"{name}：缺少有效指數時間")
+                continue
+            moment = at.replace(hour=stamp[0], minute=stamp[1], second=stamp[2], microsecond=0)
+            lag_minutes = (at-moment).total_seconds()/60
+            if lag_minutes < -2:
+                errors.append(f"{name}：報價時間晚於現在 {quote.get('time')}")
+                continue
+            quote["quote_age_minutes"] = max(0,round(lag_minutes,1))
+            found.append((moment, quote))
+        except Exception as exc:
+            errors.append(f"{name}：{type(exc).__name__} {str(exc)[:90]}")
+    if found:
+        _moment, chosen = max(found, key=lambda p: p[0])
+        if chosen["quote_age_minutes"] > 20:
+            chosen["source"] += f"（⚠ 約{int(chosen['quote_age_minutes'])}分鐘前的延遲資料）"
+        return chosen
+    raise RuntimeError("今日大盤行情未取得："+"；".join(errors))
 
 def resolve_index(close, live, at):
     """正式收盤優先；盤中只用當日快照並以正確的前日收盤計算漲跌。"""

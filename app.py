@@ -20,8 +20,8 @@ st.set_page_config(
 )
 
 # 雙檔版本驗證：即使 GitHub 只更新 app.py，仍能顯示可理解的錯誤，而非 ImportError。
-WEB_BUILD = "20261109-R19-DATED-CLOSE"
-EXPECTED_DATA_BUILD = "20261109-R19-DATED-CLOSE"
+WEB_BUILD = "20261110-R21-INDEX-REFRESH"
+EXPECTED_DATA_BUILD = "20261110-R21-INDEX-REFRESH"
 REQUIRED = (
     "TOP", "CANDIDATES", "HistoryStore", "MisClient", "apply_mis", "csv_bytes",
     "dec_str", "enrich", "fetch_official", "fetch_pe_snapshot", "attach_pe",
@@ -432,8 +432,10 @@ def index_card(at):
         st.warning(f"盤後官方加權指數尚未同步至 {at:%Y-%m-%d}；目前顯示 {close['day']} 的歷史收盤，並非今日收盤。若今天休市，則此資料可能就是最近交易日收盤。")
     if is_session(at) and not index_recent:
         st.error(f"⚠ 大盤指數不是已驗證的20分鐘內行情：{index_label}。畫面查詢時間不等於指數報價時間。")
+    if issues and is_session(at):
+        st.warning("大盤行情查詢診斷：" + "；".join(issues)[:420])
     if issues and close and (not live or close["day"] < at.date()) and is_session(at):
-        st.caption("⚠️ 盤中大盤資料暫無法更新，顯示最近交易日正式收盤值（不是現在的盤中指數）。")
+        st.caption("⚠️ 盤中大盤來源若只有前一交易日資料，會顯示歷史收盤；不能當成今天的指數。")
 
 
 @st.cache_resource(show_spinner=False)
@@ -582,7 +584,7 @@ def stock_html(row):
 </div>'''
 
 
-st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 五條均線 · 大盤漲跌 · R20 本益比右移版（沿用 R19 資料模組）</div>', unsafe_allow_html=True)
+st.markdown('<div class="board-title">📈 台股市值 TOP 50｜大盤指數＋本益比</div><div class="board-subtitle">上市＋上櫃 · 單頁 50 名 · 盤中／盤後 · 官方收盤本益比 · 五條均線 · 大盤漲跌 · R21 大盤雙來源日期驗證版（保留本益比右移）</div>', unsafe_allow_html=True)
 st.caption("免費資料顯示｜查詢時間 ≠ 成交時間；人工交叉核對：[HiStock 台股排行](https://histock.tw/stock/rank.aspx)（不作為自動抓取來源）。")
 
 
